@@ -1,4 +1,5 @@
-# EC2 Instance - Minimal Deployment (Polling Mode)
+# EC2 Instance - Minimal Deployment
+# Just like a VPS - configure OpenClaw manually
 
 data "aws_ami" "amazon_linux_2023" {
   most_recent = true
@@ -27,7 +28,6 @@ resource "aws_instance" "openclaw" {
     volume_type           = "gp3"
     volume_size           = var.ebs_volume_size
     encrypted             = true
-    kms_key_id            = aws_kms_key.main.arn
     delete_on_termination = true
 
     tags = {
@@ -37,7 +37,7 @@ resource "aws_instance" "openclaw" {
 
   metadata_options {
     http_endpoint               = "enabled"
-    http_tokens                 = "required"  # IMDSv2 only
+    http_tokens                 = "required"
     http_put_response_hop_limit = 1
   }
 
@@ -62,24 +62,6 @@ resource "aws_instance" "openclaw" {
     mkdir -p /home/openclaw/.openclaw/workspace
     chown -R openclaw:openclaw /home/openclaw
 
-    # Create startup script that fetches secrets
-    cat > /home/openclaw/start-openclaw.sh << 'SCRIPT'
-    #!/bin/bash
-    export AWS_REGION="${var.aws_region}"
-    export ANTHROPIC_API_KEY=$(aws secretsmanager get-secret-value --secret-id ${var.project_name}/anthropic-api-key --query SecretString --output text --region $AWS_REGION)
-    export TELEGRAM_BOT_TOKEN=$(aws secretsmanager get-secret-value --secret-id ${var.project_name}/telegram-bot-token --query SecretString --output text --region $AWS_REGION)
-    
-    # Initialize OpenClaw config if not exists
-    if [ ! -f /home/openclaw/.openclaw/config.json ]; then
-      openclaw init --non-interactive
-    fi
-    
-    # Start gateway
-    exec openclaw gateway start
-    SCRIPT
-    chmod +x /home/openclaw/start-openclaw.sh
-    chown openclaw:openclaw /home/openclaw/start-openclaw.sh
-
     # Create systemd service
     cat > /etc/systemd/system/openclaw.service << 'SERVICE'
     [Unit]
@@ -90,8 +72,7 @@ resource "aws_instance" "openclaw" {
     Type=simple
     User=openclaw
     WorkingDirectory=/home/openclaw
-    Environment=NODE_ENV=production
-    ExecStart=/home/openclaw/start-openclaw.sh
+    ExecStart=/usr/bin/openclaw gateway start
     Restart=always
     RestartSec=10
 
@@ -99,11 +80,10 @@ resource "aws_instance" "openclaw" {
     WantedBy=multi-user.target
     SERVICE
 
-    # Enable service (will start after secrets are configured)
     systemctl daemon-reload
     systemctl enable openclaw
 
-    echo "OpenClaw installation complete" > /var/log/openclaw-install.log
+    echo "Ready! Connect via SSM and run: sudo -u openclaw openclaw init" > /var/log/openclaw-install.log
   EOF
   )
 

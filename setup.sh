@@ -120,27 +120,33 @@ get_user_input() {
         *) AWS_REGION="eu-central-1" ;;
     esac
     
-    # Secrets
-    echo ""
-    echo -e "${YELLOW}API Keys (will be stored in AWS Secrets Manager)${NC}"
-    echo ""
-    read -p "Anthropic API Key (sk-ant-...): " ANTHROPIC_KEY
-    read -p "Telegram Bot Token (123456:ABC...): " TELEGRAM_TOKEN
-    
-    # Generate gateway token
-    GATEWAY_TOKEN=$(openssl rand -base64 32)
+    # Secrets (only for simple/full)
+    if [ "$DEPLOY_DIR" != "minimal" ]; then
+        echo ""
+        echo -e "${YELLOW}API Keys (will be stored in AWS Secrets Manager)${NC}"
+        echo ""
+        read -p "Anthropic API Key (sk-ant-...): " ANTHROPIC_KEY
+        read -p "Telegram Bot Token (123456:ABC...): " TELEGRAM_TOKEN
+        GATEWAY_TOKEN=$(openssl rand -base64 32)
+    else
+        ANTHROPIC_KEY=""
+        TELEGRAM_TOKEN=""
+        GATEWAY_TOKEN=""
+    fi
     
     echo ""
     echo -e "${GREEN}Configuration summary:${NC}"
     echo "  Deployment:  $DEPLOY_DIR"
     if [ -n "$DOMAIN_NAME" ]; then
         echo "  Domain:      $DOMAIN_NAME"
-    else
-        echo "  Domain:      (not needed - polling mode)"
     fi
     echo "  Region:      $AWS_REGION"
-    echo "  Anthropic:   ${ANTHROPIC_KEY:0:10}..."
-    echo "  Telegram:    ${TELEGRAM_TOKEN:0:10}..."
+    if [ -n "$ANTHROPIC_KEY" ]; then
+        echo "  Anthropic:   ${ANTHROPIC_KEY:0:10}..."
+        echo "  Telegram:    ${TELEGRAM_TOKEN:0:10}..."
+    else
+        echo "  Config:      (enter tokens after deploy via SSM)"
+    fi
     echo ""
     read -p "Proceed with deployment? [y/N]: " CONFIRM
     
@@ -271,33 +277,39 @@ print_summary() {
     echo "==============================================${NC}"
     echo ""
     
-    if [ -n "$PUBLIC_IP" ]; then
-        echo -e "${YELLOW}⚠️  ACTION REQUIRED: Point your domain to this IP${NC}"
+    if [ "$DEPLOY_DIR" == "minimal" ]; then
+        # Minimal deployment instructions
+        echo "Connect and configure:"
         echo ""
-        echo "   $DOMAIN_NAME → $PUBLIC_IP"
+        echo "   aws ssm start-session --target $INSTANCE_ID"
         echo ""
+        echo "Then run:"
+        echo "   sudo -u openclaw openclaw init"
+        echo "   sudo systemctl start openclaw"
+        echo ""
+        echo -e "${BLUE}Message your Telegram bot when done!${NC}"
+    else
+        # Simple/Full deployment instructions
+        if [ -n "$PUBLIC_IP" ]; then
+            echo -e "${YELLOW}⚠️  Point your domain to this IP:${NC}"
+            echo "   $DOMAIN_NAME → $PUBLIC_IP"
+            echo ""
+        fi
+        
+        if [ -n "$ALB_DNS" ]; then
+            echo -e "${YELLOW}⚠️  Create a CNAME record:${NC}"
+            echo "   $DOMAIN_NAME → $ALB_DNS"
+            echo ""
+        fi
+        
+        echo "Connect to instance:"
+        echo "   aws ssm start-session --target $INSTANCE_ID"
+        echo ""
+        echo "Your gateway token (save this!):"
+        echo "   $GATEWAY_TOKEN"
+        echo ""
+        echo -e "${BLUE}Once DNS propagates, message your Telegram bot!${NC}"
     fi
-    
-    if [ -n "$ALB_DNS" ]; then
-        echo -e "${YELLOW}⚠️  ACTION REQUIRED: Create a CNAME record${NC}"
-        echo ""
-        echo "   $DOMAIN_NAME → $ALB_DNS"
-        echo ""
-    fi
-    
-    echo "Connect to your instance:"
-    echo "   aws ssm start-session --target $INSTANCE_ID"
-    echo ""
-    echo "Check OpenClaw status:"
-    echo "   sudo systemctl status openclaw"
-    echo ""
-    echo "View logs:"
-    echo "   sudo journalctl -u openclaw -f"
-    echo ""
-    echo "Your gateway token (save this!):"
-    echo "   $GATEWAY_TOKEN"
-    echo ""
-    echo -e "${BLUE}Once DNS propagates, message your Telegram bot!${NC}"
 }
 
 # Main
@@ -306,15 +318,19 @@ main() {
     get_user_input
     create_tfvars
     deploy_infrastructure
-    store_secrets
     
-    if [ -n "$INSTANCE_ID" ]; then
-        wait_for_instance
-        start_services
-    fi
-    
-    if [ -n "$TELEGRAM_TOKEN" ]; then
-        set_telegram_webhook
+    # Only store secrets for simple/full
+    if [ "$DEPLOY_DIR" != "minimal" ]; then
+        store_secrets
+        
+        if [ -n "$INSTANCE_ID" ]; then
+            wait_for_instance
+            start_services
+        fi
+        
+        if [ -n "$TELEGRAM_TOKEN" ] && [ -n "$DOMAIN_NAME" ]; then
+            set_telegram_webhook
+        fi
     fi
     
     print_summary
