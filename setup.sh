@@ -824,46 +824,10 @@ else
 fi
 
 #═══════════════════════════════════════════════════════════════════════
-# STEP 5: Collect Credentials
+# STEP 5: Deploy Infrastructure
 #═══════════════════════════════════════════════════════════════════════
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${YELLOW}STEP 5/7: Enter Your API Credentials${NC}"
-echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo ""
-
-# Telegram Token
-echo -e "${BLUE}Telegram Bot Token${NC}"
-echo "Create a bot via @BotFather on Telegram and paste the token here."
-echo "Format: 123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
-echo ""
-read -p "Token: " TELEGRAM_TOKEN
-
-if [ -z "$TELEGRAM_TOKEN" ]; then
-    echo -e "${RED}Error: Telegram token is required${NC}"
-    exit 1
-fi
-
-echo ""
-
-# Anthropic Key
-echo -e "${BLUE}Anthropic API Key${NC}"
-echo "Get your API key from: https://console.anthropic.com/settings/keys"
-echo "Format: sk-ant-..."
-echo ""
-read -p "Key: " ANTHROPIC_KEY
-
-if [ -z "$ANTHROPIC_KEY" ]; then
-    echo -e "${RED}Error: Anthropic API key is required${NC}"
-    exit 1
-fi
-
-echo ""
-
-#═══════════════════════════════════════════════════════════════════════
-# STEP 6: Deploy Infrastructure
-#═══════════════════════════════════════════════════════════════════════
-echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${YELLOW}STEP 6/7: Deploying Infrastructure${NC}"
+echo -e "${YELLOW}STEP 5/6: Deploying Infrastructure${NC}"
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 echo "Preparing deployment to AWS account $AWS_ACCOUNT_ID in $AWS_REGION..."
@@ -979,10 +943,10 @@ echo -e "  Instance ID: ${GREEN}$INSTANCE_ID${NC}"
 echo ""
 
 #═══════════════════════════════════════════════════════════════════════
-# STEP 7: Configure OpenClaw
+# STEP 6: Wait for Instance
 #═══════════════════════════════════════════════════════════════════════
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${YELLOW}STEP 7/7: Configuring OpenClaw${NC}"
+echo -e "${YELLOW}STEP 6/6: Waiting for Instance${NC}"
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
@@ -994,60 +958,6 @@ echo "  Waiting for OpenClaw to install (60 seconds)..."
 sleep 60
 echo -e "  ${GREEN}✓ Installation complete${NC}"
 
-echo "  Configuring OpenClaw with your credentials..."
-
-# Create config (base64 to handle special chars)
-CONFIG_JSON=$(cat << EOF
-{
-  "model": {
-    "provider": "anthropic",
-    "model": "claude-sonnet-4-20250514"
-  },
-  "anthropicApiKey": "$ANTHROPIC_KEY",
-  "channels": {
-    "telegram": {
-      "botToken": "$TELEGRAM_TOKEN"
-    }
-  }
-}
-EOF
-)
-
-CONFIG_B64=$(echo "$CONFIG_JSON" | base64 -w0 2>/dev/null || echo "$CONFIG_JSON" | base64)
-
-# Send configuration via SSM
-COMMAND_ID=$(aws ssm send-command \
-    --instance-ids "$INSTANCE_ID" \
-    --document-name "AWS-RunShellScript" \
-    --parameters "{\"commands\":[
-        \"mkdir -p /home/openclaw/.openclaw\",
-        \"echo '$CONFIG_B64' | base64 -d > /home/openclaw/.openclaw/config.json\",
-        \"chown -R openclaw:openclaw /home/openclaw/.openclaw\",
-        \"systemctl restart openclaw\"
-    ]}" \
-    --region "$AWS_REGION" \
-    --query 'Command.CommandId' \
-    --output text)
-
-echo "  Applying configuration..."
-sleep 15
-
-# Check command status
-set +e
-STATUS=$(aws ssm get-command-invocation \
-    --command-id "$COMMAND_ID" \
-    --instance-id "$INSTANCE_ID" \
-    --region "$AWS_REGION" \
-    --query 'Status' \
-    --output text 2>/dev/null)
-set -e
-
-if [ "$STATUS" = "Success" ]; then
-    echo -e "  ${GREEN}✓ OpenClaw configured and started${NC}"
-else
-    echo -e "  ${YELLOW}⚠ Configuration in progress (Status: $STATUS)${NC}"
-fi
-
 echo ""
 
 #═══════════════════════════════════════════════════════════════════════
@@ -1056,23 +966,36 @@ echo ""
 echo -e "${GREEN}"
 echo "╔═══════════════════════════════════════════════════════════════╗"
 echo "║                                                               ║"
-echo "║                    SETUP COMPLETE! 🎉                         ║"
+echo "║               INFRASTRUCTURE DEPLOYED! 🎉                     ║"
 echo "║                                                               ║"
 echo "╚═══════════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
-echo ""
-echo "Your OpenClaw instance is ready!"
 echo ""
 echo -e "  ${BLUE}Instance ID:${NC}  $INSTANCE_ID"
 echo -e "  ${BLUE}Region:${NC}       $AWS_REGION"
 echo -e "  ${BLUE}Account:${NC}      $AWS_ACCOUNT_ID"
 echo ""
-echo -e "${GREEN}→ Message your Telegram bot now!${NC}"
+echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${YELLOW}  NEXT STEP: Configure OpenClaw${NC}"
+echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
-echo "Useful commands:"
+echo "  1. Connect to your instance:"
 echo ""
-echo "  # Connect to instance"
-echo "  aws ssm start-session --target $INSTANCE_ID --region $AWS_REGION"
+echo -e "     ${CYAN}aws ssm start-session --target $INSTANCE_ID --region $AWS_REGION${NC}"
+echo ""
+echo "  2. Initialize OpenClaw (enter your API keys when prompted):"
+echo ""
+echo -e "     ${CYAN}sudo -u openclaw openclaw init${NC}"
+echo ""
+echo "  3. Start OpenClaw:"
+echo ""
+echo -e "     ${CYAN}sudo systemctl start openclaw${NC}"
+echo ""
+echo "  4. Message your Telegram bot!"
+echo ""
+echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+echo "Other useful commands:"
 echo ""
 echo "  # View logs"
 echo "  sudo journalctl -u openclaw -f"
@@ -1080,6 +1003,6 @@ echo ""
 echo "  # Restart OpenClaw"
 echo "  sudo systemctl restart openclaw"
 echo ""
-echo "  # Destroy everything"
+echo "  # Destroy infrastructure"
 echo "  cd $(pwd) && terraform destroy"
 echo ""
