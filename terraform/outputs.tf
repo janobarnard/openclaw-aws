@@ -60,6 +60,16 @@ output "kms_key_arn" {
   value       = aws_kms_key.main.arn
 }
 
+output "waf_web_acl_arn" {
+  description = "WAF Web ACL ARN"
+  value       = aws_wafv2_web_acl.main.arn
+}
+
+output "alb_logs_bucket" {
+  description = "ALB access logs bucket"
+  value       = aws_s3_bucket.alb_logs.id
+}
+
 output "ssm_connect_command" {
   description = "Command to connect to instance via SSM"
   value       = "aws ssm start-session --target ${aws_instance.openclaw.id}"

@@ -10,6 +10,18 @@ resource "aws_vpc" "main" {
   }
 }
 
+# Restrict default security group (CKV2_AWS_12)
+resource "aws_default_security_group" "default" {
+  vpc_id = aws_vpc.main.id
+
+  # No ingress or egress rules = deny all traffic
+  # This prevents accidental use of the default security group
+
+  tags = {
+    Name = "${var.project_name}-default-sg-restricted"
+  }
+}
+
 # Internet Gateway
 resource "aws_internet_gateway" "main" {
   vpc_id = aws_vpc.main.id
@@ -131,7 +143,7 @@ resource "aws_flow_log" "main" {
 
 resource "aws_cloudwatch_log_group" "flow_logs" {
   name              = "/aws/vpc/${var.project_name}/flow-logs"
-  retention_in_days = 30
+  retention_in_days = var.log_retention_days
   kms_key_id        = aws_kms_key.main.arn
 
   tags = {

@@ -68,3 +68,10 @@ variable "enable_nat_gateway" {
   type        = bool
   default     = true
 }
+
+# Log retention
+variable "log_retention_days" {
+  description = "CloudWatch log retention in days (365 recommended for compliance)"
+  type        = number
+  default     = 365
+}

@@ -123,7 +123,7 @@ resource "aws_instance" "openclaw" {
 # CloudWatch Log Group for OpenClaw
 resource "aws_cloudwatch_log_group" "openclaw" {
   name              = "/aws/openclaw/${var.project_name}"
-  retention_in_days = 30
+  retention_in_days = var.log_retention_days
   kms_key_id        = aws_kms_key.main.arn
 
   tags = {
