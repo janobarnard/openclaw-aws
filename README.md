@@ -1,74 +1,52 @@
 # OpenClaw on AWS
 
-Deploy [OpenClaw](https://github.com/openclaw/openclaw) on AWS. Just like a VPS.
+One command to deploy OpenClaw on AWS.
 
 ## Cost: ~$10/month
 
-| Component | Cost |
-|-----------|------|
-| EC2 t3.micro | $7.59 |
-| EBS 20GB | $1.60 |
-| **Total** | **~$10** |
+## Setup
+
+```bash
+git clone https://github.com/rimaslogic/openclawonaws.git
+cd openclawonaws
+./setup.sh
+```
+
+The wizard will:
+1. ✅ Check prerequisites (Terraform, AWS CLI)
+2. ✅ Ask for your Telegram bot token
+3. ✅ Ask for your Anthropic API key
+4. ✅ Deploy EC2 instance
+5. ✅ Configure OpenClaw
+6. ✅ Start the service
+
+**Then message your Telegram bot!**
 
 ## Prerequisites
 
 ```bash
-# Install
-brew install terraform awscli  # macOS
-# or: apt install terraform awscli  # Ubuntu
+# macOS
+brew install terraform awscli
+
+# Ubuntu
+apt install terraform awscli
 
 # Configure AWS
 aws configure
 ```
 
-## Deploy
-
-```bash
-git clone https://github.com/rimaslogic/openclawonaws.git
-cd openclawonaws/terraform
-terraform init
-terraform apply
-```
-
-## Setup
+## Commands
 
 ```bash
 # Connect to instance
 aws ssm start-session --target <instance-id>
 
-# Configure OpenClaw (enter your Telegram token)
-sudo -u openclaw openclaw init
-
-# Start
-sudo systemctl start openclaw
-
-# Done! Message your Telegram bot 🎉
-```
-
-## Useful Commands
-
-```bash
-# Connect
-aws ssm start-session --target <instance-id>
-
 # View logs
 sudo journalctl -u openclaw -f
 
-# Restart
-sudo systemctl restart openclaw
-
 # Destroy
-terraform destroy
+cd terraform && terraform destroy
 ```
-
-## Architecture
-
-```
-EC2 (polls) → Telegram API
-    (calls) → Anthropic API
-```
-
-No inbound traffic. No domain needed. Polling mode.
 
 ## License
 
