@@ -134,11 +134,85 @@ if [ "$ACCOUNT_CHOICE" = "2" ]; then
     echo ""
     echo "Verifying profile access..."
     
-    if ! NEW_IDENTITY=$(aws sts get-caller-identity 2>&1); then
-        echo -e "${RED}✗ Cannot access AWS with profile '$AWS_PROFILE_NAME'${NC}"
-        echo ""
-        echo "Error: $NEW_IDENTITY"
-        exit 1
+    NEW_IDENTITY=$(aws sts get-caller-identity 2>&1)
+    IDENTITY_RESULT=$?
+    
+    # Check if MFA is required (common error patterns)
+    if [ $IDENTITY_RESULT -ne 0 ]; then
+        if echo "$NEW_IDENTITY" | grep -qi "mfa\|token\|session"; then
+            echo -e "${YELLOW}This profile may require MFA authentication.${NC}"
+            echo ""
+            
+            # Get MFA device
+            echo "Detecting MFA devices..."
+            
+            # Temporarily unset profile to check MFA devices with base credentials
+            TEMP_PROFILE="$AWS_PROFILE"
+            unset AWS_PROFILE
+            MFA_DEVICES=$(aws iam list-mfa-devices --query 'MFADevices[*].SerialNumber' --output text 2>/dev/null || echo "")
+            export AWS_PROFILE="$TEMP_PROFILE"
+            
+            if [ -n "$MFA_DEVICES" ] && [ "$MFA_DEVICES" != "None" ]; then
+                echo "Found MFA device(s):"
+                echo "$MFA_DEVICES" | tr '\t' '\n' | while read device; do
+                    echo "  • $device"
+                done
+                echo ""
+                
+                DEVICE_COUNT=$(echo "$MFA_DEVICES" | wc -w)
+                if [ "$DEVICE_COUNT" -eq 1 ]; then
+                    MFA_SERIAL="$MFA_DEVICES"
+                    echo -e "Using: ${GREEN}$MFA_SERIAL${NC}"
+                else
+                    read -p "Enter MFA device ARN: " MFA_SERIAL
+                fi
+            else
+                echo "Enter your MFA device ARN:"
+                echo "Format: arn:aws:iam::ACCOUNT_ID:mfa/USERNAME"
+                read -p "MFA ARN: " MFA_SERIAL
+            fi
+            
+            echo ""
+            read -p "Enter MFA code (6 digits): " MFA_CODE
+            
+            if [ -z "$MFA_SERIAL" ] || [ -z "$MFA_CODE" ]; then
+                echo -e "${RED}Error: MFA device and code are required${NC}"
+                exit 1
+            fi
+            
+            echo ""
+            echo "Getting session token with MFA..."
+            
+            # Get session token with MFA
+            unset AWS_PROFILE
+            SESSION_TOKEN=$(aws sts get-session-token \
+                --serial-number "$MFA_SERIAL" \
+                --token-code "$MFA_CODE" \
+                --duration-seconds 3600 2>&1)
+            
+            if [ $? -ne 0 ]; then
+                echo -e "${RED}✗ Failed to get session token${NC}"
+                echo "Error: $SESSION_TOKEN"
+                exit 1
+            fi
+            
+            # Export session credentials
+            export AWS_ACCESS_KEY_ID=$(echo "$SESSION_TOKEN" | grep -o '"AccessKeyId": "[^"]*"' | cut -d'"' -f4)
+            export AWS_SECRET_ACCESS_KEY=$(echo "$SESSION_TOKEN" | grep -o '"SecretAccessKey": "[^"]*"' | cut -d'"' -f4)
+            export AWS_SESSION_TOKEN=$(echo "$SESSION_TOKEN" | grep -o '"SessionToken": "[^"]*"' | cut -d'"' -f4)
+            
+            # Now verify
+            NEW_IDENTITY=$(aws sts get-caller-identity)
+            
+            EXPIRATION=$(echo "$SESSION_TOKEN" | grep -o '"Expiration": "[^"]*"' | cut -d'"' -f4)
+            echo -e "${YELLOW}Note: MFA session expires at $EXPIRATION${NC}"
+            echo ""
+        else
+            echo -e "${RED}✗ Cannot access AWS with profile '$AWS_PROFILE_NAME'${NC}"
+            echo ""
+            echo "Error: $NEW_IDENTITY"
+            exit 1
+        fi
     fi
     
     AWS_ACCOUNT_ID=$(echo "$NEW_IDENTITY" | grep -o '"Account": "[^"]*"' | cut -d'"' -f4)
@@ -165,12 +239,68 @@ elif [ "$ACCOUNT_CHOICE" = "3" ]; then
         exit 1
     fi
     
-    # Optional: External ID (some roles require this)
+    # Optional: External ID
     echo ""
     echo "External ID (leave empty if not required):"
     read -p "External ID: " EXTERNAL_ID
     
-    # Optional: Session name
+    # Check if MFA is needed
+    echo ""
+    echo "Does this role require MFA? [y/N]:"
+    read -p "MFA required: " MFA_REQUIRED
+    
+    MFA_SERIAL=""
+    MFA_CODE=""
+    
+    if [[ $MFA_REQUIRED =~ ^[Yy]$ ]]; then
+        echo ""
+        echo -e "${BLUE}MFA Configuration${NC}"
+        echo ""
+        
+        # Try to detect MFA devices
+        echo "Detecting MFA devices..."
+        MFA_DEVICES=$(aws iam list-mfa-devices --query 'MFADevices[*].SerialNumber' --output text 2>/dev/null || echo "")
+        
+        if [ -n "$MFA_DEVICES" ] && [ "$MFA_DEVICES" != "None" ]; then
+            echo ""
+            echo "Found MFA device(s):"
+            echo "$MFA_DEVICES" | tr '\t' '\n' | while read device; do
+                echo "  • $device"
+            done
+            echo ""
+            
+            # If only one device, use it automatically
+            DEVICE_COUNT=$(echo "$MFA_DEVICES" | wc -w)
+            if [ "$DEVICE_COUNT" -eq 1 ]; then
+                MFA_SERIAL="$MFA_DEVICES"
+                echo -e "Using: ${GREEN}$MFA_SERIAL${NC}"
+            else
+                read -p "Enter MFA device ARN: " MFA_SERIAL
+            fi
+        else
+            echo ""
+            echo "Could not auto-detect MFA device."
+            echo "Enter your MFA device ARN."
+            echo "Format: arn:aws:iam::ACCOUNT_ID:mfa/USERNAME"
+            echo ""
+            read -p "MFA ARN: " MFA_SERIAL
+        fi
+        
+        if [ -z "$MFA_SERIAL" ]; then
+            echo -e "${RED}Error: MFA device ARN is required${NC}"
+            exit 1
+        fi
+        
+        echo ""
+        echo "Enter the 6-digit code from your MFA device:"
+        read -p "MFA Code: " MFA_CODE
+        
+        if [ -z "$MFA_CODE" ]; then
+            echo -e "${RED}Error: MFA code is required${NC}"
+            exit 1
+        fi
+    fi
+    
     SESSION_NAME="openclaw-setup-$(date +%s)"
     
     echo ""
@@ -178,8 +308,13 @@ elif [ "$ACCOUNT_CHOICE" = "3" ]; then
     
     # Build assume-role command
     ASSUME_CMD="aws sts assume-role --role-arn $ROLE_ARN --role-session-name $SESSION_NAME"
+    
     if [ -n "$EXTERNAL_ID" ]; then
         ASSUME_CMD="$ASSUME_CMD --external-id $EXTERNAL_ID"
+    fi
+    
+    if [ -n "$MFA_SERIAL" ] && [ -n "$MFA_CODE" ]; then
+        ASSUME_CMD="$ASSUME_CMD --serial-number $MFA_SERIAL --token-code $MFA_CODE"
     fi
     
     # Assume the role
@@ -188,11 +323,19 @@ elif [ "$ACCOUNT_CHOICE" = "3" ]; then
         echo ""
         echo "Error: $ASSUMED_ROLE"
         echo ""
+        
+        # Check if MFA error
+        if echo "$ASSUMED_ROLE" | grep -qi "mfa"; then
+            echo -e "${YELLOW}Hint: This role may require MFA. Re-run and select 'y' for MFA.${NC}"
+        fi
+        
+        echo ""
         echo "Common issues:"
         echo "  • Role ARN is incorrect"
         echo "  • Trust policy doesn't allow your account/user"
         echo "  • External ID is required but not provided"
-        echo "  • Role doesn't exist"
+        echo "  • MFA is required but not provided"
+        echo "  • MFA code is expired or incorrect"
         exit 1
     fi
     
