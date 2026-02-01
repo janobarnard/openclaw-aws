@@ -292,7 +292,7 @@ elif [ "$ACCOUNT_CHOICE" = "3" ]; then
         if [ -n "$SOURCE_PROFILE" ]; then
             export AWS_PROFILE="$SOURCE_PROFILE"
             echo ""
-            echo "Verifying source profile..."
+            echo "Verifying source profile '$SOURCE_PROFILE'..."
             
             set +e
             SOURCE_IDENTITY=$(aws sts get-caller-identity 2>&1)
@@ -300,14 +300,97 @@ elif [ "$ACCOUNT_CHOICE" = "3" ]; then
             set -e
             
             if [ $SOURCE_RESULT -ne 0 ]; then
-                echo -e "${RED}✗ Cannot access source profile '$SOURCE_PROFILE'${NC}"
+                echo -e "${YELLOW}Profile verification failed.${NC}"
                 echo "Error: $SOURCE_IDENTITY"
-                exit 1
+                echo ""
+                
+                # Check if MFA might be needed
+                if echo "$SOURCE_IDENTITY" | grep -qiE "mfa|token|session|invalid|expired|accessdenied"; then
+                    echo "This profile may require MFA authentication."
+                    read -p "Do you want to authenticate with MFA? [y/N]: " USE_MFA
+                    
+                    if [[ $USE_MFA =~ ^[Yy]$ ]]; then
+                        echo ""
+                        # Get MFA device using default credentials
+                        unset AWS_PROFILE
+                        
+                        echo "Detecting MFA devices..."
+                        set +e
+                        MFA_DEVICES=$(aws iam list-mfa-devices --query 'MFADevices[*].SerialNumber' --output text 2>/dev/null)
+                        set -e
+                        
+                        if [ -n "$MFA_DEVICES" ] && [ "$MFA_DEVICES" != "None" ]; then
+                            echo "Found MFA device(s):"
+                            echo "$MFA_DEVICES" | tr '\t' '\n' | while read -r device; do
+                                [ -n "$device" ] && echo "  • $device"
+                            done
+                            echo ""
+                            FIRST_DEVICE=$(echo "$MFA_DEVICES" | awk '{print $1}')
+                            read -p "MFA device ARN [$FIRST_DEVICE]: " MFA_SERIAL
+                            MFA_SERIAL="${MFA_SERIAL:-$FIRST_DEVICE}"
+                        else
+                            echo "Enter your MFA device ARN:"
+                            read -p "MFA ARN: " MFA_SERIAL
+                        fi
+                        
+                        if [ -z "$MFA_SERIAL" ]; then
+                            echo -e "${RED}Error: MFA device ARN is required${NC}"
+                            exit 1
+                        fi
+                        
+                        read -p "Enter MFA code (6 digits): " MFA_CODE
+                        
+                        if [ -z "$MFA_CODE" ]; then
+                            echo -e "${RED}Error: MFA code is required${NC}"
+                            exit 1
+                        fi
+                        
+                        echo ""
+                        echo "Getting session credentials with MFA..."
+                        
+                        set +e
+                        SESSION_CREDS=$(aws sts get-session-token \
+                            --serial-number "$MFA_SERIAL" \
+                            --token-code "$MFA_CODE" \
+                            --duration-seconds 3600 2>&1)
+                        SESSION_RESULT=$?
+                        set -e
+                        
+                        if [ $SESSION_RESULT -ne 0 ]; then
+                            echo -e "${RED}✗ Failed to get session token${NC}"
+                            echo "Error: $SESSION_CREDS"
+                            exit 1
+                        fi
+                        
+                        # Export session credentials (these will be used for assume-role)
+                        export AWS_ACCESS_KEY_ID=$(echo "$SESSION_CREDS" | grep -o '"AccessKeyId": "[^"]*"' | cut -d'"' -f4)
+                        export AWS_SECRET_ACCESS_KEY=$(echo "$SESSION_CREDS" | grep -o '"SecretAccessKey": "[^"]*"' | cut -d'"' -f4)
+                        export AWS_SESSION_TOKEN=$(echo "$SESSION_CREDS" | grep -o '"SessionToken": "[^"]*"' | cut -d'"' -f4)
+                        
+                        EXPIRATION=$(echo "$SESSION_CREDS" | grep -o '"Expiration": "[^"]*"' | cut -d'"' -f4)
+                        echo -e "${GREEN}✓ MFA authentication successful${NC}"
+                        echo -e "${YELLOW}Session expires: $EXPIRATION${NC}"
+                        echo ""
+                        
+                        # Verify with new credentials
+                        SOURCE_IDENTITY=$(aws sts get-caller-identity)
+                        SOURCE_ACCOUNT=$(echo "$SOURCE_IDENTITY" | grep -o '"Account": "[^"]*"' | cut -d'"' -f4)
+                        echo -e "${GREEN}✓ Source credentials ready (Account: $SOURCE_ACCOUNT)${NC}"
+                        echo ""
+                    else
+                        echo -e "${RED}Cannot proceed without valid source credentials.${NC}"
+                        exit 1
+                    fi
+                else
+                    echo -e "${RED}Cannot access source profile '$SOURCE_PROFILE'.${NC}"
+                    echo "Please check that the profile exists and is configured correctly."
+                    exit 1
+                fi
+            else
+                SOURCE_ACCOUNT=$(echo "$SOURCE_IDENTITY" | grep -o '"Account": "[^"]*"' | cut -d'"' -f4)
+                echo -e "${GREEN}✓ Using source profile '$SOURCE_PROFILE' (Account: $SOURCE_ACCOUNT)${NC}"
+                echo ""
             fi
-            
-            SOURCE_ACCOUNT=$(echo "$SOURCE_IDENTITY" | grep -o '"Account": "[^"]*"' | cut -d'"' -f4)
-            echo -e "${GREEN}✓ Using source profile '$SOURCE_PROFILE' (Account: $SOURCE_ACCOUNT)${NC}"
-            echo ""
         fi
     fi
     
