@@ -21,11 +21,11 @@ variable "project_name" {
 variable "instance_type" {
   description = "EC2 instance type"
   type        = string
-  default     = "t3.micro"
+  default     = "t4g.small"
 }
 
 variable "ebs_volume_size" {
   description = "EBS volume size in GB"
   type        = number
-  default     = 20
+  default     = 30
 }

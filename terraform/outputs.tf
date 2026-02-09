@@ -12,7 +12,7 @@ output "public_ip" {
 
 output "connect_command" {
   description = "Connect via SSM"
-  value       = "aws ssm start-session --target ${aws_instance.openclaw.id}"
+  value       = "aws ssm start-session --target ${aws_instance.openclaw.id} --region ${var.aws_region}"
 }
 
 output "next_steps" {
@@ -24,17 +24,22 @@ output "next_steps" {
     ║                                                            ║
     ║  1. Connect to your instance:                              ║
     ║                                                            ║
-    ║     aws ssm start-session --target ${aws_instance.openclaw.id}
+    ║     aws ssm start-session --target ${aws_instance.openclaw.id} --region ${var.aws_region}
     ║                                                            ║
-    ║  2. Initialize OpenClaw (enter your Telegram token):       ║
+    ║  2. Initialize OpenClaw (enter your API keys):             ║
     ║                                                            ║
-    ║     sudo -u openclaw openclaw init                         ║
+    ║     sudo -u openclaw openclaw onboard --install-daemon      ║
     ║                                                            ║
-    ║  3. Start OpenClaw:                                        ║
+    ║  3. Open dashboard locally (SSM port forward):             ║
     ║                                                            ║
-    ║     sudo systemctl start openclaw                          ║
+    ║     aws ssm start-session --target ${aws_instance.openclaw.id} --region ${var.aws_region} \
+    ║       --document-name AWS-StartPortForwardingSession \
+    ║       --parameters '{"portNumber":["18789"],"localPortNumber":["18789"]}'
     ║                                                            ║
-    ║  4. Message your Telegram bot!                             ║
+    ║     http://localhost:18789/                                ║
+    ║     Token: sudo -u openclaw openclaw config get gateway.auth.token ║
+    ║                                                            ║
+    ║  4. Message your bot!                                      ║
     ║                                                            ║
     ╚════════════════════════════════════════════════════════════╝
   EOT

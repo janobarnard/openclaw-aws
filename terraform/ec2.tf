@@ -7,7 +7,7 @@ data "aws_ami" "amazon_linux_2023" {
 
   filter {
     name   = "name"
-    values = ["al2023-ami-*-x86_64"]
+    values = ["al2023-ami-*-arm64"]
   }
 
   filter {
@@ -83,7 +83,7 @@ resource "aws_instance" "openclaw" {
     systemctl daemon-reload
     systemctl enable openclaw
 
-    echo "Ready! Connect via SSM and run: sudo -u openclaw openclaw init" > /var/log/openclaw-install.log
+    echo "Ready! Connect via SSM and run: sudo -u openclaw openclaw onboard --install-daemon" > /var/log/openclaw-install.log
   EOF
   )
 
