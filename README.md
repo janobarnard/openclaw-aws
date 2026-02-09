@@ -34,7 +34,7 @@ The interactive wizard walks through the deployment flow:
 6. **Deploys infrastructure** — VPC, subnet, IGW, SG, IAM, EC2
 7. **Waits for instance readiness** — Confirms EC2 is ready and OpenClaw is installed
 
-After the wizard finishes, connect over SSM and run onboarding as the `openclaw` user.
+After the wizard finishes, connect over SSM and run onboarding as the `openclaw` user. The subnet is pinned to an availability zone that supports the selected instance type.
 
 ## Prerequisites
 
@@ -61,6 +61,9 @@ aws ssm start-session --target <instance-id> --region <region>
 # Run onboarding as the openclaw user (this writes config to /home/openclaw)
 # This installs and starts the gateway service.
 sudo -u openclaw openclaw onboard --install-daemon
+
+# If a skill install fails due to missing Go (example: blogwatcher)
+sudo dnf install -y golang
 
 # Access dashboard locally via SSM port-forwarding (run from your machine)
 aws ssm start-session \

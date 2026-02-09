@@ -1,5 +1,18 @@
 # Minimal VPC - Single Public Subnet, Outbound Only
 
+data "aws_ec2_instance_type_offerings" "instance_azs" {
+  location_type = "availability-zone"
+
+  filter {
+    name   = "instance-type"
+    values = [var.instance_type]
+  }
+}
+
+locals {
+  instance_az = length(data.aws_ec2_instance_type_offerings.instance_azs.locations) > 0 ? data.aws_ec2_instance_type_offerings.instance_azs.locations[0] : null
+}
+
 resource "aws_vpc" "main" {
   cidr_block           = "10.0.0.0/16"
   enable_dns_hostnames = true
@@ -22,6 +35,7 @@ resource "aws_subnet" "public" {
   vpc_id                  = aws_vpc.main.id
   cidr_block              = "10.0.1.0/24"
   map_public_ip_on_launch = true  # Auto-assign public IP
+  availability_zone       = local.instance_az
 
   tags = {
     Name = "${var.project_name}-public"
